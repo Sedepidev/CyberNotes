@@ -1,0 +1,58 @@
+name: Build Unsigned IPA (for sideloading)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    env:
+      XCODE_VERSION: "15.4"
+      SCHEME: "CyberNotes"
+      PROJECT: "CyberNotes.xcodeproj"
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_${{ env.XCODE_VERSION }}.app
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate .xcodeproj
+        run: xcodegen generate
+
+      # Archivo SIN firmar: sin certificado, sin perfil, sin secrets.
+      - name: Archive app (unsigned)
+        run: |
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/CyberNotes.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
+      # xcodebuild -exportArchive exige firma, así que empaquetamos
+      # el .app manualmente en la estructura Payload/ que espera un .ipa.
+      - name: Package unsigned .ipa
+        run: |
+          APP_PATH="$RUNNER_TEMP/CyberNotes.xcarchive/Products/Applications/CyberNotes.app"
+          PAYLOAD_DIR="$RUNNER_TEMP/Payload"
+          mkdir -p "$PAYLOAD_DIR"
+          cp -R "$APP_PATH" "$PAYLOAD_DIR/"
+          cd "$RUNNER_TEMP"
+          zip -r CyberNotes-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CyberNotes-unsigned-ipa
+          path: ${{ runner.temp }}/CyberNotes-unsigned.ipa
